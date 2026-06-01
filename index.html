@@ -1,33 +1,317 @@
-body {
-        margin: 0;
-        padding: 0;
-        /* 📱 배경 이미지 설정 */
-        background-image: url('bg.png'); 
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        /* 💡 핵심: 화면 세로 높이를 무조건 모니터 화면(100vh)에 딱 맞춥니다 */
-        height: 100vh; 
-        font-family: 'Malgun Gothic', sans-serif;
-        overflow: hidden;
-        touch-action: none; 
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>아이돌 얼굴 맞추기 게임</title>
+    <!-- Matter.js 물리 엔진 라이브러리 로드 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            /* 📱 배경 이미지 설정 (PNG 확장자 반영) */
+            background-image: url('bg.png'); 
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            /* 💡 화면 세로 높이를 브라우저 창(100vh)에 딱 맞추어 스크롤 방지 */
+            height: 100vh; 
+            font-family: 'Malgun Gothic', sans-serif;
+            overflow: hidden;
+            touch-action: none; 
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            border-radius: 12px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.9); /* 게임판 배경을 살짝 투명하게 처리 */
+            
+            /* 💡 창 크기가 작아지더라도 게임판이 화면 밖으로 벗어나지 않게 자동 축소 */
+            max-width: 95vw;
+            max-height: 85vh; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #score-board {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            z-index: 10;
+            background: rgba(255,255,255,0.85);
+            padding: 6px 14px;
+            border-radius: 20px;
+        }
+        #next-preview {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255,255,255,0.85);
+            padding: 8px;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            z-index: 10;
+        }
+        #next-image {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-top: 5px;
+            background-size: cover;
+            background-position: center;
+            border: 2px solid #ddd;
+            display: inline-block;
+        }
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+        #game-over h1 { font-size: 38px; margin-bottom: 10px; }
+        #game-over button {
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #ff4757;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        #gameCanvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="score-board">SCORE: <span id="score">0</span></div>
+    <div id="next-preview">
+        NEXT<br>
+        <div id="next-image"></div>
+    </div>
+    <div id="game-over">
+        <h1>GAME OVER</h1>
+        <p>최종 점수: <span id="final-score">0</span>점</p>
+        <button onclick="resetGame()">다시 도전하기</button>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+// --- [내 사진 파일 설정] ---
+const FACE_IMAGES = [
+    "01.jpg", "02.jpg", "03.jpg", "04.jpg", "05.jpg", 
+    "06.jpg", "07.jpg", "08.jpg", "09.jpg", "10.jpg", "11.jpg"
+];
+
+// 각 단계별 크기(반지름) 설정
+const LEVEL_SIZES = [20, 26, 32, 38, 44, 52, 60, 70, 80, 92, 105];
+
+// 이미지 객체 미리 로드
+const loadedImages = [];
+FACE_IMAGES.forEach((src) => {
+    const img = new Image();
+    img.src = src;
+    loadedImages.push(img);
+});
+
+const { Engine, Render, Runner, Bodies, Composite, Body, Events } = Matter;
+let engine, runner, canvas;
+const width = 400; 
+const height = 620;
+let score = 0;
+let currentNextLevel = 0;
+let canDrop = true;
+let isGameOver = false;
+
+function init() {
+    canvas = document.getElementById("gameCanvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    engine = Engine.create({ gravity: { y: 1.5 } }); 
+    
+    const ground = Bodies.rectangle(width / 2, height + 30, width, 60, { isStatic: true, friction: 0.1 });
+    const leftWall = Bodies.rectangle(-30, height / 2, 60, height, { isStatic: true, friction: 0.1 });
+    const rightWall = Bodies.rectangle(width + 30, height / 2, 60, height, { isStatic: true, friction: 0.1 });
+    Composite.add(engine.world, [ground, leftWall, rightWall]);
+
+    currentNextLevel = Math.floor(Math.random() * 4);
+    updateNextPreview();
+
+    // 마우스 및 모바일 터치 이벤트 동시 지원
+    canvas.addEventListener("click", handleCanvasClick);
+    canvas.addEventListener("touchstart", function(e) {
+        e.preventDefault(); 
+        handleCanvasClick(e.touches[0]);
+    });
+
+    Events.on(engine, 'collisionStart', handleCollision);
+    requestAnimationFrame(renderLoop);
+    
+    runner = Runner.create();
+    Runner.run(runner, engine);
+}
+
+function renderLoop() {
+    if (isGameOver) return;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+
+    // 데드라인 선 그리기
+    ctx.strokeStyle = "#ff4757";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, 100);
+    ctx.lineTo(width, 100);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const bodies = Composite.allBodies(engine.world);
+    
+    bodies.forEach(body => {
+        if (body.isStatic) return;
+
+        const { x, y } = body.position;
+        const radius = body.circleRadius;
+        const level = body.gameLevel;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(body.angle);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+
+        const img = loadedImages[level];
+        ctx.drawImage(img, -radius, -radius, radius * 2, radius * 2);
+
+        ctx.strokeStyle = "rgba(0,0,0,0.08)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.restore();
+
+        if (y - radius < 100 && body.velocity.y < 0.1 && !body.isNew) {
+            triggerGameOver();
+        }
+    });
+
+    requestAnimationFrame(renderLoop);
+}
+
+function handleCanvasClick(e) {
+    if (!canDrop || isGameOver) return;
+    canDrop = false;
+
+    const rect = canvas.getBoundingClientRect();
+    let clickX = e.clientX - rect.left;
+
+    if(e.clientX === undefined && e.pageX !== undefined) {
+        clickX = e.pageX - rect.left;
     }
-    #game-container {
-        position: relative;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        border-radius: 12px;
-        overflow: hidden;
-        background: rgba(255, 255, 255, 0.9); 
-        
-        /* 💡 핵심: 모니터 창 크기가 작아지더라도 게임판이 화면 밖으로 안 벗어나게 제한합니다 */
-        max-width: 95vw;
-        max-height: 85vh; /* 창 높이의 85%만 차지하도록 제한해서 스크롤을 없앱니다 */
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
+
+    const currentRadius = LEVEL_SIZES[currentNextLevel];
+    if (clickX < currentRadius) clickX = currentRadius;
+    if (clickX > width - currentRadius) clickX = width - currentRadius;
+
+    const ball = Bodies.circle(clickX, 50, currentRadius, {
+        restitution: 0.15,
+        friction: 0.08,
+        density: 0.001
+    });
+    
+    ball.gameLevel = currentNextLevel;
+    ball.isNew = true;
+
+    setTimeout(() => { ball.isNew = false; }, 1000);
+
+    Composite.add(engine.world, ball);
+
+    currentNextLevel = Math.floor(Math.random() * 4);
+    updateNextPreview();
+
+    setTimeout(() => { canDrop = true; }, 450); 
+}
+
+function handleCollision(event) {
+    const pairs = event.pairs;
+    
+    pairs.forEach(pair => {
+        const bodyA = pair.bodyA;
+        const bodyB = pair.bodyB;
+
+        if (!bodyA.isStatic && !bodyB.isStatic && bodyA.gameLevel === bodyB.gameLevel) {
+            const currentLevel = bodyA.gameLevel;
+            if (currentLevel >= FACE_IMAGES.length - 1) return;
+
+            const midX = (bodyA.position.x + bodyB.position.x) / 2;
+            const midY = (bodyA.position.y + bodyB.position.y) / 2;
+
+            Composite.remove(engine.world, [bodyA, bodyB]);
+
+            score += (currentLevel + 1) * 10;
+            document.getElementById("score").innerText = score;
+
+            const nextLevel = currentLevel + 1;
+            const newBall = Bodies.circle(midX, midY, LEVEL_SIZES[nextLevel], {
+                restitution: 0.15,
+                friction: 0.08
+            });
+            newBall.gameLevel = nextLevel;
+
+            Composite.add(engine.world, newBall);
+        }
+    });
+}
+
+function updateNextPreview() {
+    const nextImgDiv = document.getElementById("next-image");
+    nextImgDiv.style.backgroundImage = `url('${FACE_IMAGES[currentNextLevel]}')`;
+}
+
+function triggerGameOver() {
+    isGameOver = true;
+    document.getElementById("final-score").innerText = score;
+    document.getElementById("game-over").style.display = "flex";
+    Runner.stop(runner);
+}
+
+function resetGame() {
+    location.reload();
+}
+
+window.onload = init;
+</script>
+
+</body>
+</html>
