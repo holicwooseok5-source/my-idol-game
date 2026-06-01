@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>아이돌 얼굴 맞추기 게임 (애니메이션 버전)</title>
+    <title>아이돌 얼굴 맞추기 게임</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body {
             margin: 0;
             padding: 0;
-            background-image: url('bg.png'); 
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
+            /* 💡 컴퓨터 전체 배경은 눈이 편안한 은은한 회색 단색으로 처리합니다 */
+            background: #f0f2f5; 
             
             display: flex;
             flex-direction: column;
@@ -25,14 +23,22 @@
         }
         #game-container {
             position: relative;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            border-radius: 12px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.25);
+            border-radius: 16px;
             overflow: hidden;
-            background: transparent; 
-            border: 2px solid rgba(255, 255, 255, 0.4); 
             
+            /* 💻 📱 핵심 수정: 배경 이미지(bg.png)를 게임 창 '안쪽'으로 이사 보냈습니다! */
+            background-image: url('bg.png'); 
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            border: 2px solid rgba(255, 255, 255, 0.6); 
+            
+            /* 게임판 비율이 컴퓨터에서도 무너지지 않고 칼같이 유지되도록 고정 */
+            width: 400px;
+            height: 620px;
             max-width: 95vw;
-            max-height: 85vh; 
+            max-height: 90vh; 
             display: flex;
             align-items: center;
             justify-content: center;
@@ -98,8 +104,8 @@
         }
         #gameCanvas {
             display: block;
-            max-width: 100%;
-            height: auto;
+            width: 100%;
+            height: 100%;
             cursor: pointer;
             background: transparent; 
         }
@@ -205,7 +211,7 @@ function updateAimX(e) {
     let clientX = e.clientX;
     if (clientX === undefined && e.pageX !== undefined) clientX = e.pageX;
     
-    let x = clientX - rect.left;
+    let x = ((clientX - rect.left) / rect.width) * width; // 해상도 스케일 보정 추가
     const currentRadius = LEVEL_SIZES[currentNextLevel];
     
     if (x < currentRadius) x = currentRadius;
@@ -229,7 +235,7 @@ function endAim() {
     ball.gameLevel = currentNextLevel;
     ball.isNew = true;      
     ball.hasHitSound = false; 
-    ball.spawnScale = 1.0; // 일반 생성은 기본 크기
+    ball.spawnScale = 0.2; // 부드럽게 생성 효과 유지
 
     setTimeout(() => { ball.isNew = false; }, 1000);
 
@@ -286,9 +292,8 @@ function renderLoop() {
         const radius = body.circleRadius;
         const level = body.gameLevel;
 
-        // 💡 부드럽게 크기가 커지는 애니메이션 계산 (0.2에서 1.0까지 점진적 상승)
         if (body.spawnScale !== undefined && body.spawnScale < 1.0) {
-            body.spawnScale += 0.08; // 이 숫자가 클수록 더 빠르게 팍 커집니다.
+            body.spawnScale += 0.08; 
             if (body.spawnScale > 1.0) body.spawnScale = 1.0;
         }
 
@@ -350,8 +355,6 @@ function handleCollision(event) {
             });
             newBall.gameLevel = nextLevel;
             newBall.hasHitSound = true; 
-            
-            // 💡 새로 합성된 공은 처음에 작은 크기(0.2)에서 시작하도록 설정
             newBall.spawnScale = 0.2; 
 
             Composite.add(engine.world, newBall);
