@@ -10,7 +10,6 @@
         body {
             margin: 0;
             padding: 0;
-            /* 📱 배경 이미지 설정 (PNG 확장자 반영) */
             background-image: url('bg.png'); 
             background-size: cover;
             background-position: center;
@@ -20,7 +19,6 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            /* 💡 화면 세로 높이를 브라우저 창(100vh)에 딱 맞추어 스크롤 방지 */
             height: 100vh; 
             font-family: 'Malgun Gothic', sans-serif;
             overflow: hidden;
@@ -31,9 +29,8 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
             border-radius: 12px;
             overflow: hidden;
-            background: rgba(255, 255, 255, 0.9); /* 게임판 배경을 살짝 투명하게 처리 */
+            background: rgba(255, 255, 255, 0.9);
             
-            /* 💡 창 크기가 작아지더라도 게임판이 화면 밖으로 벗어나지 않게 자동 축소 */
             max-width: 95vw;
             max-height: 85vh; 
             display: flex;
@@ -103,6 +100,7 @@
             display: block;
             max-width: 100%;
             height: auto;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -123,16 +121,23 @@
 </div>
 
 <script>
-// --- [내 사진 파일 설정] ---
+// --- [내 사진 파일 설정: 0을 빼고 1부터 시작하도록 수정 완료] ---
 const FACE_IMAGES = [
-    "01.jpg", "02.jpg", "03.jpg", "04.jpg", "05.jpg", 
-    "06.jpg", "07.jpg", "08.jpg", "09.jpg", "10.jpg", "11.jpg"
+    "1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg", 
+    "6.jpg", "7.jpg", "8.jpg", "9.jpg", "10.jpg", "11.jpg"
 ];
 
-// 각 단계별 크기(반지름) 설정
 const LEVEL_SIZES = [20, 26, 32, 38, 44, 52, 60, 70, 80, 92, 105];
 
-// 이미지 객체 미리 로드
+// 🔊 오디오 객체
+const dropSound = new Audio('drop.mp3');       
+const popSound = new Audio('pop.mp3');         
+const gameOverSound = new Audio('gameover.mp3'); 
+
+dropSound.volume = 0.4;
+popSound.volume = 0.5;
+gameOverSound.volume = 0.6;
+
 const loadedImages = [];
 FACE_IMAGES.forEach((src) => {
     const img = new Image();
@@ -149,6 +154,9 @@ let currentNextLevel = 0;
 let canDrop = true;
 let isGameOver = false;
 
+let isAiming = false; 
+let aimX = width / 2;  
+
 function init() {
     canvas = document.getElementById("gameCanvas");
     canvas.width = width;
@@ -164,12 +172,14 @@ function init() {
     currentNextLevel = Math.floor(Math.random() * 4);
     updateNextPreview();
 
-    // 마우스 및 모바일 터치 이벤트 동시 지원
-    canvas.addEventListener("click", handleCanvasClick);
-    canvas.addEventListener("touchstart", function(e) {
-        e.preventDefault(); 
-        handleCanvasClick(e.touches[0]);
-    });
+    canvas.addEventListener("mousedown", startAim);
+    canvas.addEventListener("touchstart", (e) => { e.preventDefault(); startAim(e.touches[0]); });
+
+    canvas.addEventListener("mousemove", moveAim);
+    canvas.addEventListener("touchmove", (e) => { e.preventDefault(); moveAim(e.touches[0]); });
+
+    canvas.addEventListener("mouseup", endAim);
+    canvas.addEventListener("touchend", endAim);
 
     Events.on(engine, 'collisionStart', handleCollision);
     requestAnimationFrame(renderLoop);
@@ -178,13 +188,63 @@ function init() {
     Runner.run(runner, engine);
 }
 
+function startAim(e) {
+    if (!canDrop || isGameOver) return;
+    isAiming = true;
+    updateAimX(e);
+}
+
+function moveAim(e) {
+    if (!isAiming || isGameOver) return;
+    updateAimX(e);
+}
+
+function updateAimX(e) {
+    const rect = canvas.getBoundingClientRect();
+    let clientX = e.clientX;
+    if (clientX === undefined && e.pageX !== undefined) clientX = e.pageX;
+    
+    let x = clientX - rect.left;
+    const currentRadius = LEVEL_SIZES[currentNextLevel];
+    
+    if (x < currentRadius) x = currentRadius;
+    if (x > width - currentRadius) x = width - currentRadius;
+    
+    aimX = x;
+}
+
+function endAim() {
+    if (!isAiming || !canDrop || isGameOver) return;
+    isAiming = false;
+    canDrop = false;
+
+    const currentRadius = LEVEL_SIZES[currentNextLevel];
+    const ball = Bodies.circle(aimX, 50, currentRadius, {
+        restitution: 0.15,
+        friction: 0.08,
+        density: 0.001
+    });
+    
+    ball.gameLevel = currentNextLevel;
+    ball.isNew = true;      
+    ball.hasHitSound = false; 
+
+    setTimeout(() => { ball.isNew = false; }, 1000);
+
+    Composite.add(engine.world, ball);
+
+    currentNextLevel = Math.floor(Math.random() * 4);
+    updateNextPreview();
+
+    setTimeout(() => { canDrop = true; }, 450); 
+}
+
 function renderLoop() {
     if (isGameOver) return;
 
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, width, height);
 
-    // 데드라인 선 그리기
     ctx.strokeStyle = "#ff4757";
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
@@ -193,6 +253,27 @@ function renderLoop() {
     ctx.lineTo(width, 100);
     ctx.stroke();
     ctx.setLineDash([]);
+
+    if (isAiming && canDrop) {
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.2)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(aimX, 50);
+        ctx.lineTo(aimX, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const radius = LEVEL_SIZES[currentNextLevel];
+        ctx.save();
+        ctx.translate(aimX, 50);
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(loadedImages[currentNextLevel], -radius, -radius, radius * 2, radius * 2);
+        ctx.restore();
+    }
 
     const bodies = Composite.allBodies(engine.world);
     
@@ -229,40 +310,6 @@ function renderLoop() {
     requestAnimationFrame(renderLoop);
 }
 
-function handleCanvasClick(e) {
-    if (!canDrop || isGameOver) return;
-    canDrop = false;
-
-    const rect = canvas.getBoundingClientRect();
-    let clickX = e.clientX - rect.left;
-
-    if(e.clientX === undefined && e.pageX !== undefined) {
-        clickX = e.pageX - rect.left;
-    }
-
-    const currentRadius = LEVEL_SIZES[currentNextLevel];
-    if (clickX < currentRadius) clickX = currentRadius;
-    if (clickX > width - currentRadius) clickX = width - currentRadius;
-
-    const ball = Bodies.circle(clickX, 50, currentRadius, {
-        restitution: 0.15,
-        friction: 0.08,
-        density: 0.001
-    });
-    
-    ball.gameLevel = currentNextLevel;
-    ball.isNew = true;
-
-    setTimeout(() => { ball.isNew = false; }, 1000);
-
-    Composite.add(engine.world, ball);
-
-    currentNextLevel = Math.floor(Math.random() * 4);
-    updateNextPreview();
-
-    setTimeout(() => { canDrop = true; }, 450); 
-}
-
 function handleCollision(event) {
     const pairs = event.pairs;
     
@@ -279,6 +326,9 @@ function handleCollision(event) {
 
             Composite.remove(engine.world, [bodyA, bodyB]);
 
+            popSound.currentTime = 0;
+            popSound.play().catch(e => console.log("오디오 차단 방지"));
+
             score += (currentLevel + 1) * 10;
             document.getElementById("score").innerText = score;
 
@@ -288,8 +338,21 @@ function handleCollision(event) {
                 friction: 0.08
             });
             newBall.gameLevel = nextLevel;
+            newBall.hasHitSound = true; 
 
             Composite.add(engine.world, newBall);
+        } 
+        else {
+            if (!bodyA.isStatic && bodyA.hasHitSound === false) {
+                bodyA.hasHitSound = true;
+                dropSound.currentTime = 0;
+                dropSound.play().catch(e => {});
+            }
+            if (!bodyB.isStatic && bodyB.hasHitSound === false) {
+                bodyB.hasHitSound = true;
+                dropSound.currentTime = 0;
+                dropSound.play().catch(e => {});
+            }
         }
     });
 }
@@ -301,6 +364,7 @@ function updateNextPreview() {
 
 function triggerGameOver() {
     isGameOver = true;
+    gameOverSound.play().catch(e => console.log("오디오 차단 방지"));
     document.getElementById("final-score").innerText = score;
     document.getElementById("game-over").style.display = "flex";
     Runner.stop(runner);
